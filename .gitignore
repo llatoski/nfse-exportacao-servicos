@@ -1,0 +1,23 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — nunca commitar
+*.pfx
+*.p12
+*.pem
+*.key
+credentials.json
+token.json
+
+# Saída
+out/
+*.xml
+*.pdf
+!tests/fixtures/*.xml
+!tests/fixtures/*.pdf
