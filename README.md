@@ -6,7 +6,8 @@
 </p>
 
 <p align="center">
-  <img alt="Python 3.13" src="https://img.shields.io/badge/python-3.13-3776ab">
+  <a href="https://github.com/llatoski/nfse-exportacao-servicos/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/llatoski/nfse-exportacao-servicos/actions/workflows/tests.yml/badge.svg"></a>
+  <img alt="Python 3.12 and 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776ab">
   <img alt="NFS-e Nacional, layout 1.01" src="https://img.shields.io/badge/NFS--e%20Nacional-layout%201.01-1f6feb">
   <img alt="signature: XMLDSig" src="https://img.shields.io/badge/signature-XMLDSig-6e7781">
   <img alt="transport: mTLS, ICP-Brasil A1" src="https://img.shields.io/badge/transport-mTLS%2C%20ICP--Brasil%20A1-2da44e">
@@ -51,11 +52,15 @@
 - **Operated by an AI agent with a human in the loop.** [`skill/SKILL.md`](skill/SKILL.md) is the runbook
   under which an AI coding agent (Claude Code) runs the tool: checks before a batch, a plan with every
   amount shown to the user, confirmation before production, and the table of server errors.
+- **Tested offline.** 58 tests run on every push, on Python 3.12 and 3.13, with the network blocked. The
+  server is simulated, while the parsing, the DPS, the XSD validation and the signature are the real
+  code. The signature is checked independently with the certificate's public key, and every rule of the
+  rejection table has a test ([below](#tests)).
 
 **Contents:** [What this repository shows](#what-this-repository-shows) · [At a glance](#at-a-glance) ·
 [Terms](#terms) · [How it works](#how-it-works) · [What the server rejects](#what-the-server-rejects) ·
 [Quick start](#quick-start) · [Configuration](#configuration) · [Command line](#command-line) ·
-[Safety model](#safety-model) · [Repository layout](#repository-layout) · [Documentation](#documentation) ·
+[Safety model](#safety-model) · [Tests](#tests) · [Repository layout](#repository-layout) · [Documentation](#documentation) ·
 [Scope and limits](#scope-and-limits) · [Licence](#licence-and-disclaimer)
 
 ---
@@ -167,8 +172,8 @@ For an export, the municipal tax group carries only `tribISSQN=3`, the country o
 
 ## Quick start
 
-Needs Python 3.13 (the version it runs on), an ICP-Brasil A1 certificate of the company (e-CNPJ) as a
-`.pfx` file, and a municipality that has joined the national NFS-e system.
+Needs Python 3.12 or 3.13 (both tested on every push), an ICP-Brasil A1 certificate of the company
+(e-CNPJ) as a `.pfx` file, and a municipality that has joined the national NFS-e system.
 
 ```bash
 git clone https://github.com/llatoski/nfse-exportacao-servicos.git
@@ -236,13 +241,43 @@ unexpected error with a single receipt, `2` at least one invoice failed.
 - **A person confirms production.** The agent runbook shows the plan (each receipt, its USD and BRL
   amounts, the total) and asks before issuing in production.
 
+## Tests
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+58 tests, about two seconds, and no network: a fixture refuses every connection, and the server's
+answers are simulated. A self-signed certificate generated at test time stands in for the A1, and all
+the data are fictitious. GitHub Actions runs them on every push, on Python 3.12 and 3.13.
+
+| File | What it pins down |
+|---|---|
+| [`test_xml_builder.py`](tests/test_xml_builder.py) | The identifier, validity against the official XSD, a malformed DPS refused before it leaves, and the rules of the rejection table that live in the DPS (E0004, E0006, E0128, E0166, E0712, the fields forbidden for an export) |
+| [`test_signer.py`](tests/test_signer.py) | No namespace prefix (E1228), exclusive canonicalisation (E0714), the digest and the RSA signature checked independently with the certificate's public key, a value changed after signing breaks the digest, the signed DPS still passes the XSD |
+| [`test_main.py`](tests/test_main.py) | An existing DPS is recovered and never resent, the counter moves only on success, a timeout leaves it alone, a batch goes on after a failure and moves only the accepted receipts, and one run from receipt to saved invoice |
+| [`test_nfse_client.py`](tests/test_nfse_client.py) | The JSON body with gzip and base64 (415), the private key written with mode 0600, a server error never read as "does not exist" |
+| [`test_parser.py`](tests/test_parser.py) | The Wise fields, the thousands separator, a missing field named in the error |
+| [`test_state.py`](tests/test_state.py), [`test_ptax.py`](tests/test_ptax.py) | The counter per CNPJ, series and environment, and the PTAX rate walking back to the last business day |
+
+Before publication, four deliberate faults were put into a copy of the code: inclusive
+canonicalisation, a `ds:` prefix, the counter advancing on a rejection, and the existence check
+skipped. Each one made at least one test fail.
+
+Not covered: text extraction from a real PDF (the tests hand the parser the text that `pdfplumber`
+would return) and the real server, which only a real certificate can reach.
+
 ## Repository layout
 
 ```
 nfse-exportacao-servicos/
 ├── README.md
 ├── .env.example            every setting, with placeholder values (the real .env is never committed)
-├── requirements.txt
+├── requirements.txt        runtime dependencies
+├── requirements-dev.txt    the same plus pytest
+├── pytest.ini
+├── .github/workflows/      the test run on every push (Python 3.12 and 3.13)
 ├── src/nfse_exportacao/
 │   ├── main.py             command line: one receipt, batch, peek, query
 │   ├── parser.py           Wise receipt → amounts and dates
@@ -252,6 +287,7 @@ nfse-exportacao-servicos/
 │   ├── nfse_client.py      mutual-TLS client of the Sefin Nacional API
 │   ├── state.py            DPS counter per CNPJ, series and environment
 │   └── config.py           settings read from .env
+├── tests/                  58 offline tests, fictitious data, a self-signed certificate made at test time
 ├── skill/SKILL.md          runbook for an AI coding agent operating the tool
 └── docs/
     ├── gotchas.md          every server rejection met, with its cause and fix (Portuguese)
@@ -287,10 +323,8 @@ The official files are included as published on the national NFS-e portal.
 - **No cancellation.** An invoice is cancelled by hand on the national issuer portal.
 - **No DANFSe download.** The portal asks for an hCaptcha on every download and the API does not serve
   the PDF, so the PDF is downloaded by hand.
-- **No automated tests.** The tool was checked against the government's test environment and is used
-  in production. An offline check with a self-signed certificate (receipt parsing, XSD validation, an
-  independent verification of the signature) was run before publication, but it is not part of the
-  repository.
+- **The real server is not in the tests.** They simulate its answers. The tool itself was checked in
+  the government's test environment and is used in production.
 
 ## Licence and disclaimer
 
