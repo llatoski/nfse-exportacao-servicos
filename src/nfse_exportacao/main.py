@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 from decimal import Decimal
 from pathlib import Path
 
 from .config import Settings, get_settings
+from .emissao import SERIE_DPS, dados_dps, listar_recibos, mover
+from .emissao import salvar_saida as _salvar_saida
 from .nfse_client import (
     consultar_chave_por_id,
     consultar_nfse,
@@ -19,19 +20,7 @@ from .parser import extrair
 from .ptax import cotacao_usd_brl
 from .signer import assinar_xml
 from .state import DpsCounter
-from .xml_builder import DadosDPS, id_dps, montar_dps_xml, validar_dps
-
-SERIE_DPS = "1"
-
-
-def _salvar_saida(recibo_path: Path, resposta: dict, output_dir: Path) -> Path:
-    base = output_dir / f"nfse-{recibo_path.stem}"
-    saida_json = base.with_suffix(".json")
-    saida_json.write_text(json.dumps(resposta, indent=2, ensure_ascii=False))
-    if "nfseXmlGZipB64" in resposta:
-        base.with_suffix(".xml").write_bytes(descompactar_nfse(resposta["nfseXmlGZipB64"]))
-    return saida_json
-
+from .xml_builder import id_dps, montar_dps_xml, validar_dps
 
 def processar_recibo(recibo_path: Path, numero_dps: int) -> tuple[Path, dict]:
     settings = get_settings()
@@ -44,40 +33,7 @@ def processar_recibo(recibo_path: Path, numero_dps: int) -> tuple[Path, dict]:
         ptax = cotacao_usd_brl(recibo.data_pagamento)
         valor_brl = (recibo.valor_usd * ptax).quantize(Decimal("0.01"))
 
-    codigo_trib_nac = "010401"  # LC116 1.04 → 6 dígitos
-
-    dados = DadosDPS(
-        numero_dps=numero_dps,
-        serie_dps=SERIE_DPS,
-        data_emissao=recibo.data_pagamento,
-        competencia=recibo.data_pagamento,
-        tp_ambiente="1" if settings.nfse_ambiente == "producao" else "2",
-        valor_servico_brl=valor_brl,
-        valor_servico_usd=recibo.valor_usd,
-        descricao=f"{settings.servico_descricao} — {recibo.descricao_detalhe}",
-        codigo_tributacao_nacional=codigo_trib_nac,
-        prestador_cnpj=settings.prestador_cnpj,
-        prestador_municipio_ibge=settings.prestador_municipio_ibge,
-        prestador_cep=settings.prestador_cep,
-        prestador_logradouro=settings.prestador_logradouro,
-        prestador_numero=settings.prestador_numero,
-        prestador_complemento=settings.prestador_complemento or None,
-        prestador_bairro=settings.prestador_bairro,
-        prestador_im=settings.prestador_inscricao_municipal or None,
-        tomador_nome=settings.tomador_nome,
-        tomador_pais=settings.tomador_pais,
-        tomador_nif=settings.tomador_documento_exterior or None,
-        tomador_cep_ext=settings.tomador_cep_ext,
-        tomador_cidade=settings.tomador_cidade,
-        tomador_estado=settings.tomador_estado,
-        tomador_logradouro=settings.tomador_logradouro,
-        tomador_numero=settings.tomador_numero,
-        tomador_bairro=settings.tomador_bairro,
-        pais_resultado=settings.tomador_pais,
-        aliq_simples_aprox=Decimal(str(settings.aliq_simples_aprox)),
-    )
-
-    xml_dps = montar_dps_xml(dados)
+    xml_dps = montar_dps_xml(dados_dps(recibo, valor_brl, numero_dps, settings))
     validar_dps(xml_dps)
     xml_assinado = assinar_xml(xml_dps, settings.cert_path, settings.cert_password)
     resposta = enviar_dps(xml_assinado, settings.nfse_base_url, settings.cert_path, settings.cert_password)
@@ -166,7 +122,7 @@ def _rodar_batch(batch_dir: Path, mover_para: Path | None, settings: Settings, c
     if not batch_dir.is_dir():
         print(f"Diretório não existe: {batch_dir}", file=sys.stderr)
         return 1
-    pdfs = sorted(batch_dir.glob("*.pdf"))
+    pdfs = listar_recibos(batch_dir)
     if not pdfs:
         print(f"Nenhum PDF em {batch_dir}", file=sys.stderr)
         return 1
@@ -201,9 +157,7 @@ def _rodar_batch(batch_dir: Path, mover_para: Path | None, settings: Settings, c
 
 
 def _mover(pdf: Path, destino_dir: Path) -> None:
-    destino = destino_dir / pdf.name
-    shutil.move(str(pdf), str(destino))
-    print(f"  → movido para {destino}")
+    print(f"  → movido para {mover(pdf, destino_dir)}")
 
 
 if __name__ == "__main__":

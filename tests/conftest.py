@@ -25,6 +25,7 @@ from nfse_exportacao.xml_builder import DadosDPS
 CNPJ = "11222333000181"
 MUNICIPIO = "3550308"
 SENHA_PFX = "senha-de-teste"
+SENHA_ERRADA = "nao-e-esta"
 
 
 @pytest.fixture(autouse=True)
@@ -150,3 +151,53 @@ def recibo(tmp_path: Path) -> Path:
     caminho = tmp_path / "wise_teste.txt"
     caminho.write_text(texto_wise(), encoding="utf-8")
     return caminho
+
+
+def pdf_de_texto(linhas: list[str]) -> bytes:
+    """Um PDF de uma página, uma linha de texto em Helvetica embaixo da outra.
+
+    Escrito à mão (sem biblioteca de PDF) para que os testes passem pelo `pdfplumber` de verdade.
+    """
+    comandos = ["BT", "/F1 11 Tf", "14 TL", "50 780 Td"]
+    for linha in linhas:
+        texto = linha.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        comandos.append(f"({texto}) Tj T*")
+    comandos.append("ET")
+    conteudo = "\n".join(comandos).encode("latin-1")
+    objetos = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n" % len(conteudo) + conteudo + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    posicoes = []
+    for i, objeto in enumerate(objetos, start=1):
+        posicoes.append(len(pdf))
+        pdf += b"%d 0 obj\n" % i + objeto + b"\nendobj\n"
+    xref = len(pdf)
+    pdf += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objetos) + 1)
+    for posicao in posicoes:
+        pdf += b"%010d 00000 n \n" % posicao
+    pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objetos) + 1, xref)
+    return bytes(pdf)
+
+
+def escrever_recibo_pdf(caminho: Path, texto: str) -> Path:
+    caminho.write_bytes(pdf_de_texto(texto.splitlines()))
+    return caminho
+
+
+@pytest.fixture
+def pasta(tmp_path: Path) -> Path:
+    """Quatro comprovantes em PDF: três bons e um sem o valor em reais (wise_02), mais um arquivo que não é PDF."""
+    p = tmp_path / "recibos"
+    p.mkdir()
+    escrever_recibo_pdf(p / "wise_01.pdf", texto_wise(numero="1000000001", usd="1,000.00", brl="5,123.45"))
+    escrever_recibo_pdf(p / "wise_02.pdf", texto_wise(numero="1000000002", sem="brl"))
+    escrever_recibo_pdf(p / "wise_03.pdf", texto_wise(numero="1000000003", usd="2,000.00", brl="10,500.00"))
+    escrever_recibo_pdf(p / "wise_04.pdf", texto_wise(numero="1000000004", usd="500.00", brl="2,600.50"))
+    (p / "anotacoes.txt").write_text("não é um recibo", encoding="utf-8")
+    return p

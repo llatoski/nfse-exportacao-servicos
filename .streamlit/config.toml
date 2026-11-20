@@ -1,0 +1,15 @@
+# A interface só aceita conexões deste computador e não envia estatísticas de uso.
+[server]
+address = "127.0.0.1"
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# sem o botão "Deploy": a interface é só local
+toolbarMode = "minimal"
+
+[theme]
+# azul nos botões; o vermelho fica reservado para a faixa de produção
+primaryColor = "#1c64f2"

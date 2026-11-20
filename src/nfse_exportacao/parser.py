@@ -37,8 +37,14 @@ def _parse_wise(texto: str, arquivo: Path) -> Recibo:
     m_usd = re.search(r"Amount paid by[^\n]+\n([\d.,]+)\s+USD", texto)
     m_brl = re.search(r"Total to[^\n]+\n([\d.,]+)\s+BRL", texto)
     if not (m_id and m_funded and m_usd and m_brl):
-        falta = [n for n, v in [("id", m_id), ("funded", m_funded), ("usd", m_usd), ("brl", m_brl)] if not v]
-        raise ValueError(f"Recibo Wise com campos faltando em {arquivo.name}: {falta}")
+        campos = [
+            ("número da transferência (#…)", m_id),
+            ('data "Funded"', m_funded),
+            ('valor pago em USD ("Amount paid by")', m_usd),
+            ('valor recebido em BRL ("Total to")', m_brl),
+        ]
+        falta = ", ".join(nome for nome, achado in campos if not achado)
+        raise ValueError(f"comprovante Wise sem {falta}")
 
     funded = datetime.strptime(m_funded.group(1).strip(), "%B %d, %Y").date()
     valor_usd = Decimal(m_usd.group(1).replace(",", ""))

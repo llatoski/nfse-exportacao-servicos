@@ -34,7 +34,10 @@ def test_reconhece_pelo_nome_do_arquivo(tmp_path: Path) -> None:
     assert extrair(caminho).valor_brl == Decimal("5123.45")
 
 
-@pytest.mark.parametrize(("linha", "campo"), [("id", "id"), ("datas", "funded"), ("usd", "usd"), ("brl", "brl")])
+@pytest.mark.parametrize(
+    ("linha", "campo"),
+    [("id", "número da transferência"), ("datas", "Funded"), ("usd", "Amount paid by"), ("brl", "Total to")],
+)
 def test_campo_faltando_e_nomeado(tmp_path: Path, linha: str, campo: str) -> None:
     caminho = tmp_path / "wise_incompleto.txt"
     caminho.write_text(texto_wise(sem=linha), encoding="utf-8")
@@ -47,3 +50,11 @@ def test_formato_desconhecido_e_recusado(tmp_path: Path) -> None:
     caminho.write_text("Invoice 42\nTotal 100.00 USD\n", encoding="utf-8")
     with pytest.raises(ValueError, match="não reconhecido"):
         extrair(caminho)
+
+
+def test_le_um_pdf_pelo_pdfplumber(tmp_path: Path) -> None:
+    from conftest import escrever_recibo_pdf
+
+    caminho = escrever_recibo_pdf(tmp_path / "wise_pdf.pdf", texto_wise())
+    r = extrair(caminho)
+    assert (r.valor_usd, r.valor_brl, r.data_pagamento) == (Decimal("1000.00"), Decimal("5123.45"), dt.date(2026, 3, 3))

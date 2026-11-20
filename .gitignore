@@ -21,3 +21,6 @@ out/
 *.pdf
 !tests/fixtures/*.xml
 !tests/fixtures/*.pdf
+
+# Recibos de pagamento (dados financeiros)
+recibos/

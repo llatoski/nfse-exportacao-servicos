@@ -5,7 +5,7 @@ description: Use quando o usuário quiser emitir NFS-e (Nota Fiscal de Serviços
 
 # Emitir NFS-e de exportação de serviços
 
-Skill para um agente de código (Claude Code) operar este projeto. Os caminhos abaixo são relativos à raiz do projeto; `<recibos>` e `<emitidas>` são as pastas que o usuário escolher.
+Skill opcional para um agente de código (Claude Code) operar este projeto pela linha de comando. Uma pessoa não precisa dela: a interface (`make ui`) faz o mesmo fluxo, com a conferência e a autorização na tela. Os caminhos abaixo são relativos à raiz do projeto; `<recibos>` e `<emitidas>` são as pastas que o usuário escolher.
 
 ## Estrutura
 

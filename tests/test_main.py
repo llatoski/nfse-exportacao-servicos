@@ -197,3 +197,16 @@ def test_recibo_inexistente_na_linha_de_comando(
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     monkeypatch.setattr("sys.argv", ["main", str(tmp_path / "nao-existe.pdf")])
     assert cli.main() == 1
+
+
+def test_consulta_por_chave_na_linha_de_comando(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    nfse = base64.b64encode(gzip.compress(b"<NFSe>consultada</NFSe>")).decode()
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "consultar_nfse", lambda chave, *a: {"chaveAcesso": chave, "nfseXmlGZipB64": nfse})
+    monkeypatch.setattr("sys.argv", ["main", "--consultar", "K123"])
+    settings.output_dir.mkdir(parents=True)
+    assert cli.main() == 0
+    assert (settings.output_dir / "consulta-K123.xml").read_bytes() == b"<NFSe>consultada</NFSe>"
+    assert (settings.output_dir / "consulta-K123.json").exists()

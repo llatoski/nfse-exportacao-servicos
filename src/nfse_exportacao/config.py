@@ -44,6 +44,10 @@ class Settings(BaseSettings):
 
     output_dir: Path = Path("./out")
 
+    # interface: a pasta onde procurar os recibos e para onde movê-los depois de emitidos
+    recibos_dir: Path = Path("./recibos")
+    emitidas_dir: Path = Path("./recibos/emitidas")
+
     @property
     def nfse_base_url(self) -> str:
         return self.nfse_base_url_prod if self.nfse_ambiente == "producao" else self.nfse_base_url_homolog

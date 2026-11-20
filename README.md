@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Issues Brazilian electronic service invoices (NFS-e) for services exported abroad, straight from Wise payment receipts.</b><br>
-  One command per batch: read the receipt, build the invoice, validate it, sign it, send it over mutual TLS, keep the result.
+  A local interface in three steps: find the receipts, review and authorise the batch, issue and save. A command line does the same.
 </p>
 
 <p align="center">
@@ -16,10 +16,20 @@
 </p>
 
 <p align="center">
+  <a href="#the-interface">The interface</a> ·
   <a href="docs/gotchas.md">Server rejections and fixes</a> ·
-  <a href="skill/SKILL.md">Agent skill</a> ·
   <a href=".env.example">Configuration template</a> ·
   <a href="docs/">Official specifications</a>
+</p>
+
+<p align="center">
+  <img src="docs/images/interface-passo2.png" width="900"
+       alt="Step 2 of the interface: the batch ready for review, with the DPS numbers, the Wise references, the amounts in USD and BRL, the exchange rate, one receipt left out with its reason, and the authorisation box">
+</p>
+
+<p align="center">
+  <sub>Step 2, review and authorise, on fictitious data: an example CNPJ, a self-signed certificate and a
+  simulated server (<a href="#the-interface">the three steps</a>).</sub>
 </p>
 
 > [!IMPORTANT]
@@ -49,16 +59,18 @@
 - **Safe against a dangerous server behaviour.** Sending a second invoice for an identifier that already
   has one triggers an automatic cancellation by substitution. Before every submission the client asks
   the server whether the identifier exists, and if it does, recovers the invoice instead of sending.
-- **Operated by an AI agent with a human in the loop.** [`skill/SKILL.md`](skill/SKILL.md) is the runbook
-  under which an AI coding agent (Claude Code) runs the tool: checks before a batch, a plan with every
-  amount shown to the user, confirmation before production, and the table of server errors.
-- **Tested offline.** 58 tests run on every push, on Python 3.12 and 3.13, with the network blocked. The
-  server is simulated, while the parsing, the DPS, the XSD validation and the signature are the real
-  code. The signature is checked independently with the certificate's public key, and every rule of the
-  rejection table has a test ([below](#tests)).
+- **A person authorises every batch, and what is authorised is what is sent.** The interface reads the
+  receipts and builds, validates and signs every DPS *before* asking. The review screen shows each
+  number, reference and amount, and the bytes approved there are the bytes sent. Production needs a
+  typed word, and the batch stops at the first problem so that no number is skipped
+  ([the interface](#the-interface)).
+- **Tested offline.** 83 tests run on every push, on Python 3.12 and 3.13, with the network blocked. The
+  server is simulated, while the PDF reading, the DPS, the XSD validation, the signature and the
+  interface are the real code. The signature is checked independently with the certificate's public
+  key, and every rule of the rejection table has a test ([below](#tests)).
 
 **Contents:** [What this repository shows](#what-this-repository-shows) · [At a glance](#at-a-glance) ·
-[Terms](#terms) · [How it works](#how-it-works) · [What the server rejects](#what-the-server-rejects) ·
+[Terms](#terms) · [The interface](#the-interface) · [How it works](#how-it-works) · [What the server rejects](#what-the-server-rejects) ·
 [Quick start](#quick-start) · [Configuration](#configuration) · [Command line](#command-line) ·
 [Safety model](#safety-model) · [Tests](#tests) · [Repository layout](#repository-layout) · [Documentation](#documentation) ·
 [Scope and limits](#scope-and-limits) · [Licence](#licence-and-disclaimer)
@@ -72,6 +84,7 @@
 | **What it does** | Turns each Wise payment receipt into an authorised NFS-e, issued through the national API (Sefin Nacional) |
 | **For whom** | A Brazilian company in the Simples Nacional regime (ME/EPP) that provides a service to one client abroad and is paid through Wise |
 | **Input** | Wise "transfer confirmation" PDFs, in English, one per payment |
+| **How it is used** | A local interface in the browser (`make ui`, served on `127.0.0.1` only), or the command line |
 | **Output** | The authorised invoice (XML) and the server's full answer (JSON) in `out/`, one pair per receipt |
 | **Tax treatment** | Export of services: the municipal service tax (ISS) is not levied, the client's country is where the result is verified, service code 1.04 (software development) |
 | **Standards** | DPS layout 1.01, validated locally against the official XSD; XMLDSig enveloped signature (exclusive canonicalisation, RSA-SHA1); mutual TLS with an ICP-Brasil A1 certificate |
@@ -93,7 +106,40 @@
 | **NIF** | The client's tax number abroad (an EIN in the US); the DPS may state that none is required |
 | **ICP-Brasil A1** | A digital certificate of the Brazilian public-key infrastructure, held as a file (`.pfx`), which signs the DPS and authenticates the connection |
 
+## The interface
+
+`make ui` opens it at `http://127.0.0.1:8501`. It accepts connections from this computer only and sends
+no usage statistics. The top of the page always shows the environment (a blue band for the test
+environment, a red one for production), the company's CNPJ, the next DPS number, and whether the
+certificate opens and until when it is valid. Below it, three boxes show which step you are in.
+
+**① Find the receipts.** Choose the folder of Wise receipts and the folder where issued receipts go.
+Nothing is sent in this step.
+
+<p align="center"><img src="docs/images/interface-passo1.png" width="820" alt="Step 1: the environment band, the company, the next DPS number, the certificate, the three step boxes and the two folder fields"></p>
+
+**② Review and authorise.** Every receipt is read, and its DPS is built, validated against the official
+XSD and signed. The table shows, for each receipt, the DPS number it will take, the Wise reference, the
+date of competence, the amounts in USD and BRL, the implied exchange rate and the approximate taxes.
+Totals sit above it, and a receipt that cannot be read stays out of the batch with its reason and takes
+no number. The signed XML of each DPS can be opened for inspection. A short fingerprint of the batch
+(SHA-256 of the signed XMLs) identifies what was reviewed. Issuing needs the box "Conferi os recibos, os
+valores e os números acima" ticked, and in production also the word `EMITIR` typed.
+
+**③ Issue and save.** The approved DPS are sent in order, each after asking the server whether it
+already exists. The result table gives each invoice's access key, where it was saved and where the
+receipt went. If the server refuses a DPS, the batch stops there: the following ones are not sent, the
+counter stays on the refused number, and their receipts stay in the folder.
+
+<p align="center"><img src="docs/images/interface-passo3.png" width="820" alt="Step 3: three invoices issued, with their access keys, the files saved in out/ and the receipts moved to recibos/emitidas"></p>
+
+The pictures use fictitious data: the example CNPJ 11.222.333/0001-81, a self-signed certificate made
+for the occasion, generated receipts and a simulated server.
+
 ## How it works
+
+The diagram follows one receipt. In the interface, steps 1 to 4 run for every receipt before the
+authorisation, and steps 5 and 6 only after it. The command line runs all six for each receipt in turn.
 
 ```mermaid
 flowchart TD
@@ -131,7 +177,8 @@ flowchart TD
    receipt moves to the issued folder. On a rejection the server's error codes are printed and the
    number stays free for the corrected retry.
 
-Example of a batch run, with fictitious data. The messages are the program's own, in Portuguese:
+Example of a batch on the command line, with fictitious data. The messages are the program's own, in
+Portuguese:
 
 ```text
 $ PYTHONPATH=src .venv/bin/python -m nfse_exportacao.main --batch recibos --mover-para recibos/emitidas
@@ -179,12 +226,14 @@ Needs Python 3.12 or 3.13 (both tested on every push), an ICP-Brasil A1 certific
 git clone https://github.com/llatoski/nfse-exportacao-servicos.git
 cd nfse-exportacao-servicos
 
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+make install                # .venv with the dependencies (or: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt)
 cp .env.example .env        # fill in the provider, the client and the certificate; keep producaorestrita
-
-PYTHONPATH=src .venv/bin/python -m nfse_exportacao.main --peek                 # next DPS number
-PYTHONPATH=src .venv/bin/python -m nfse_exportacao.main recibos/wise_0001.pdf  # one invoice, test environment
+make test                   # the offline tests
+make ui                     # the interface at http://127.0.0.1:8501
 ```
+
+Put the Wise receipts in `recibos/` (or set `RECIBOS_DIR`), open the interface and follow the three
+steps.
 
 Switch to `NFSE_AMBIENTE=producao` only after an invoice has been accepted in the test environment. The
 two environments keep separate counters.
@@ -203,6 +252,7 @@ every variable with placeholder values.
 | **Client abroad** | `TOMADOR_NOME`, `TOMADOR_PAIS`, `TOMADOR_DOCUMENTO_EXTERIOR`, foreign address fields | Empty `TOMADOR_DOCUMENTO_EXTERIOR` means "NIF not required" (`cNaoNIF=2`) |
 | **Approximate taxes** | `ALIQ_SIMPLES_APROX` | The Simples Nacional rate in %, used only for the approximate-taxes line of the DANFSe (Lei 12.741) |
 | **Output** | `OUTPUT_DIR` | Default `./out`; the counter files live here too |
+| **Interface folders** | `RECIBOS_DIR`, `EMITIDAS_DIR` | Where the interface looks for receipts and where it moves them once issued; both can be changed on the page |
 
 A few variables are kept for reference and never sent: the provider's address (the server reads it
 from the CNPJ register, see E0128), `PRESTADOR_RAZAO_SOCIAL`, `PRESTADOR_REGIME` and
@@ -210,7 +260,10 @@ from the CNPJ register, see E0128), `PRESTADOR_RAZAO_SOCIAL`, `PRESTADOR_REGIME`
 
 ## Command line
 
-`python -m nfse_exportacao.main` (with `PYTHONPATH=src`):
+The same work without the interface, one receipt at a time: `python -m nfse_exportacao.main` (with
+`PYTHONPATH=src`). It shows no review step, so it suits a person who has already checked the receipts, or
+an automation. [`skill/SKILL.md`](skill/SKILL.md) is a runbook for an AI coding agent (Claude Code) that
+drives it, with the plan shown and confirmed before production; the interface does not need it.
 
 | Call | What it does |
 |---|---|
@@ -235,11 +288,18 @@ unexpected error with a single receipt, `2` at least one invoice failed.
 - **The counter moves only on success.** It advances on HTTP 201 or on a recovery. A rejected DPS keeps
   its number for the corrected retry.
 - **Validated before it leaves.** A DPS that fails the official XSD is never signed or sent.
+- **What is approved is what is sent.** In the interface, each DPS is signed before the review and the
+  same bytes are sent after it. If the counter, the environment or the CNPJ changed in between, nothing
+  is sent and the batch has to be prepared again.
+- **No skipped numbers.** The interface reserves the numbers in sequence and stops at the first refusal
+  or error. A recovered invoice whose amount differs from its receipt also stops the batch, is saved
+  under its DPS number instead of the receipt's name, and leaves the receipt where it was.
+- **Production needs a typed word.** Besides the confirmation box, issuing in production needs `EMITIR`
+  typed, under a red band.
+- **Local only.** The interface listens on `127.0.0.1` and does not send usage statistics.
 - **Secrets stay local.** `.env`, certificates (`*.pfx`, `*.p12`, `*.pem`, `*.key`) and `out/` are
   git-ignored. For the TLS connection the private key is written to temporary files created with mode
   0600 and deleted when the process exits normally.
-- **A person confirms production.** The agent runbook shows the plan (each receipt, its USD and BRL
-  amounts, the total) and asks before issuing in production.
 
 ## Tests
 
@@ -248,9 +308,10 @@ unexpected error with a single receipt, `2` at least one invoice failed.
 .venv/bin/python -m pytest
 ```
 
-58 tests, about two seconds, and no network: a fixture refuses every connection, and the server's
-answers are simulated. A self-signed certificate generated at test time stands in for the A1, and all
-the data are fictitious. GitHub Actions runs them on every push, on Python 3.12 and 3.13.
+83 tests, about twenty seconds, and no network: a fixture refuses every connection, and the server's
+answers are simulated. A self-signed certificate generated at test time stands in for the A1, the
+receipts are small PDFs written by the tests and read by `pdfplumber`, and all the data are fictitious.
+GitHub Actions runs them on every push, on Python 3.12 and 3.13.
 
 | File | What it pins down |
 |---|---|
@@ -258,15 +319,19 @@ the data are fictitious. GitHub Actions runs them on every push, on Python 3.12 
 | [`test_signer.py`](tests/test_signer.py) | No namespace prefix (E1228), exclusive canonicalisation (E0714), the digest and the RSA signature checked independently with the certificate's public key, a value changed after signing breaks the digest, the signed DPS still passes the XSD |
 | [`test_main.py`](tests/test_main.py) | An existing DPS is recovered and never resent, the counter moves only on success, a timeout leaves it alone, a batch goes on after a failure and moves only the accepted receipts, and one run from receipt to saved invoice |
 | [`test_nfse_client.py`](tests/test_nfse_client.py) | The JSON body with gzip and base64 (415), the private key written with mode 0600, a server error never read as "does not exist" |
-| [`test_parser.py`](tests/test_parser.py) | The Wise fields, the thousands separator, a missing field named in the error |
+| [`test_lote.py`](tests/test_lote.py) | Preparing sends nothing and numbers only the readable receipts, the bytes sent are the bytes approved, a refusal or a network error stops the batch without skipping a number, an existing DPS is recovered, a recovered invoice with another amount stops the batch and keeps the receipt, a changed counter or environment blocks the batch, the certificate check |
+| [`test_ui.py`](tests/test_ui.py) | The interface run by Streamlit's `AppTest`: the three steps, the issue button locked until the box is ticked, the typed word in production, a certificate that does not open, a missing folder, where a refused batch stopped |
+| [`test_parser.py`](tests/test_parser.py) | The Wise fields read from a PDF, the thousands separator, a missing field named in the error |
 | [`test_state.py`](tests/test_state.py), [`test_ptax.py`](tests/test_ptax.py) | The counter per CNPJ, series and environment, and the PTAX rate walking back to the last business day |
 
-Before publication, four deliberate faults were put into a copy of the code: inclusive
-canonicalisation, a `ds:` prefix, the counter advancing on a rejection, and the existence check
-skipped. Each one made at least one test fail.
+Ten deliberate faults were put into copies of the code: inclusive canonicalisation, a `ds:` prefix,
+the counter advancing on a rejection, the existence check skipped (once on the command line, once in the
+interface), the batch going on after a refusal, a receipt moved although its recovered invoice differs,
+the counter check skipped, production without the typed word, and bytes sent that differ from the
+approved ones. Each one made at least one test fail.
 
-Not covered: text extraction from a real PDF (the tests hand the parser the text that `pdfplumber`
-would return) and the real server, which only a real certificate can reach.
+Not covered: a real Wise PDF (the test PDFs carry the same lines of text, laid out more simply) and the
+real server, which only a real certificate can reach.
 
 ## Repository layout
 
@@ -274,12 +339,17 @@ would return) and the real server, which only a real certificate can reach.
 nfse-exportacao-servicos/
 ├── README.md
 ├── .env.example            every setting, with placeholder values (the real .env is never committed)
+├── Makefile                make install, test, ui, peek
 ├── requirements.txt        runtime dependencies
 ├── requirements-dev.txt    the same plus pytest
 ├── pytest.ini
+├── .streamlit/config.toml  the interface on 127.0.0.1 only, no usage statistics
 ├── .github/workflows/      the test run on every push (Python 3.12 and 3.13)
 ├── src/nfse_exportacao/
+│   ├── ui.py               the interface: find, review and authorise, issue and save
+│   ├── lote.py             the interface's batch: prepare without sending, issue what was approved
 │   ├── main.py             command line: one receipt, batch, peek, query
+│   ├── emissao.py          shared by both: the DPS data of a receipt, saving, moving
 │   ├── parser.py           Wise receipt → amounts and dates
 │   ├── ptax.py             Central Bank USD/BRL rate (for receipts without BRL)
 │   ├── xml_builder.py      DPS layout 1.01, identifier, local XSD validation
@@ -287,9 +357,10 @@ nfse-exportacao-servicos/
 │   ├── nfse_client.py      mutual-TLS client of the Sefin Nacional API
 │   ├── state.py            DPS counter per CNPJ, series and environment
 │   └── config.py           settings read from .env
-├── tests/                  58 offline tests, fictitious data, a self-signed certificate made at test time
-├── skill/SKILL.md          runbook for an AI coding agent operating the tool
+├── tests/                  83 offline tests, fictitious data, a self-signed certificate made at test time
+├── skill/SKILL.md          optional runbook for an AI coding agent driving the command line
 └── docs/
+    ├── images/             pictures of the interface, on fictitious data
     ├── gotchas.md          every server rejection met, with its cause and fix (Portuguese)
     ├── anexo_i-…xlsx       official layout and business rules of the DPS and NFS-e, version 1.01
     ├── anexo_a-…xlsx       official municipality (IBGE) and country (ISO) codes
@@ -302,7 +373,7 @@ nfse-exportacao-servicos/
 | Document | What is in it |
 |---|---|
 | [`docs/gotchas.md`](docs/gotchas.md) | The rejections, the signature details, the identifier, the export rules, the endpoints, the legacy encryption of some `.pfx` files, and why the DANFSe PDF cannot be downloaded without a person |
-| [`skill/SKILL.md`](skill/SKILL.md) | The operating procedure for an AI agent: pre-flight checks, batch, recovery, error table, when not to use the tool |
+| [`skill/SKILL.md`](skill/SKILL.md) | Optional: the operating procedure for an AI agent driving the command line (pre-flight checks, batch, recovery, error table) |
 | [`docs/anexo_i-sefin_adn-dps_nfse-v1-01.xlsx`](docs/anexo_i-sefin_adn-dps_nfse-v1-01.xlsx) | The official source of the business rules (sheets `LEIAUTE DPS_NFS-e` and `RN DPS_NFS-e`), worth more than the PDF manual |
 | [`docs/xsd/`](docs/xsd/) | The official XSD schemas, versions 1.00 and 1.01 |
 | [`docs/swagger-sefin.json`](docs/swagger-sefin.json) | The API description, which the server serves only over mutual TLS |
